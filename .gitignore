@@ -1,0 +1,82 @@
+# dependencies and package-manager caches
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing and generated local QA reports
+coverage/
+test-results/
+playwright-report/
+/qa/*.json
+
+# next.js
+.next/
+.vinext/
+/out/
+
+# misc
+.DS_Store
+*.pem
+*.key
+*.p12
+*.pfx
+Thumbs.db
+Desktop.ini
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+*.log.*
+logs/
+
+# local environment
+.env*
+!.env.example
+
+# deployment and generated files
+.vercel/
+next-env.d.ts
+/dist/
+/.wrangler/
+/outputs/
+/work/
+
+.data/
+qa/artifacts/
+*.tsbuildinfo
+
+.pnpm-store/
+.cache/
+.vite/
+.turbo/
+.eslintcache
+.stylelintcache
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db
+*.db-*
+auth-secret
+qa-auth-secret
+
+# Only the inspected build-required Sites manifest is source configuration.
+/.openai/*
+!/.openai/hosting.json
+
+# Local editor/agent state and temporary files
+/.codex/
+/.agents/
+/.idea/
+/.vscode/
+*.tmp
+*.bak
+*.swp
+*.swo
