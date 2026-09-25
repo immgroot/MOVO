@@ -4,6 +4,7 @@ import './polish.css';
 import './turn-polish.css';
 import './premium.css';
 import './connection.css';
+import './rules-polish.css';
 const origin = new URL(
   process.env.MOVO_PUBLIC_ORIGIN ?? 'http://localhost:3000',
 );

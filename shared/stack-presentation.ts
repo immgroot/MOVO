@@ -10,7 +10,7 @@ export function stackPresentation<T extends StackPiece>(
   pieces: T[],
   legal: string[],
   active?: number,
-  numbered: string[] = [],
+  _numbered: string[] = [],
   moving: string[] = [],
 ) {
   const groups = new Map<string, T[]>();
@@ -37,21 +37,11 @@ export function stackPresentation<T extends StackPiece>(
         );
       const slot = group.findIndex((p) => p.id === piece.id),
         count = group.length;
-      let x = 0,
+      const x = 0,
         y =
           count > 1
             ? (count - 1 - slot) * Math.min(3.5, 14 / (count - 1)) - 3
             : 0;
-      if (numbered.includes(piece.id) && piece.position.kind === 'HOME') {
-        // The four distinct Finish slots are close together. Expand only this
-        // local presentation so their numbered badges remain separate.
-        let dx = ((piece.number % 2) - 0.5) * 18;
-        let dy = (Math.floor(piece.number / 2) - 0.5) * 21;
-        for (let n = 0; n < (piece.position.homeSeat ?? piece.seat); n++)
-          [dx, dy] = [-dy, dx];
-        x += dx;
-        y += dy;
-      }
       const selectable = legal.includes(piece.id),
         priority = moving.includes(piece.id)
           ? 3

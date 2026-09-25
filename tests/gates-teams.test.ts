@@ -210,16 +210,16 @@ describe('KNOCKOUT 2v2', () => {
     s.pieces[5].position = track(4);
     expect(legalMoves(s, 'GROOT', 5)[0].path).toHaveLength(5);
   });
-  it('knocks both opposing colors while preserving a teammate on the same tile', () => {
+  it('respects the opposing two-color shield while preserving all occupants', () => {
     const s = game('KNOCKOUT_2V2');
     s.pieces[0].position = track(3);
     for (const i of [4, 8, 12]) s.pieces[i].position = track(6);
     s.dice = 3;
     const r = resolveMove(s, 'GROOT', 'GROOT:0');
-    expect(r.state.players[0].knocked).toBe(2);
+    expect(r.state.players[0].knocked).toBe(0);
     expect(r.state.pieces[8].position.kind).toBe('TRACK');
-    expect(r.state.pieces[4].position.kind).toBe('BASE');
-    expect(r.state.pieces[12].position.kind).toBe('BASE');
+    expect(r.state.pieces[4].position.kind).toBe('TRACK');
+    expect(r.state.pieces[12].position.kind).toBe('TRACK');
   });
   it('a knock unlocks the attacker only; their partner stays individually locked', () => {
     const s = game('KNOCKOUT_2V2');

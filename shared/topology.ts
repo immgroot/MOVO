@@ -69,7 +69,7 @@ export function coordinates(position: Position, seat: Seat, piece: number) {
   if (position.kind === 'HOME_LANE') return laneCell(seat, position.index);
   if (position.kind === 'HOME') {
     const [x, y] = rotate(
-      [6.65 + (piece % 2) * 0.7, 7.65 + Math.floor(piece / 2) * 0.6],
+      [6.78 + (piece % 2) * 0.44, 7.54 + Math.floor(piece / 2) * 0.44],
       position.homeSeat ?? seat,
     );
     return { x, y };

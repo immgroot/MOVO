@@ -22,6 +22,7 @@ import type {
   Snapshot,
   RoomSettings,
 } from '../shared/protocol';
+import { MODES, isRevenge, isTeamMode, normalizeMode } from '../shared/modes';
 import { HOME_GATES, isOuter, type Seat } from '../shared/topology';
 import { REACTIONS, type ChatMessage, type Reaction } from '../shared/chat';
 import { migrateRevenge } from '../shared/revenge-migration';
@@ -67,13 +68,12 @@ function settings(input: unknown): RoomSettings {
     ![0, 15, 30, 45].includes(x.timerSeconds!) ||
     typeof x.private !== 'boolean' ||
     typeof x.spectators !== 'boolean' ||
-    (x.mode !== undefined &&
-      !['KNOCKOUT', 'KNOCKOUT_2V2', 'REVENGE'].includes(x.mode)) ||
-    ((x.mode === 'KNOCKOUT_2V2' || x.mode === 'REVENGE') && x.capacity !== 4)
+    (x.mode !== undefined && ![...MODES, 'REVENGE'].includes(x.mode)) ||
+    (x.mode && isTeamMode(x.mode) && x.capacity !== 4)
   )
     return fail('Check the room settings and try again.');
   return {
-    mode: x.mode ?? 'KNOCKOUT',
+    mode: normalizeMode(x.mode ?? 'KNOCKOUT'),
     name: clean(x.name, 32, 'The evening table') || 'The evening table',
     capacity: x.capacity!,
     private: x.private,
@@ -103,13 +103,13 @@ export function createGameService(options: Options = {}) {
       guests: SavedGuest[];
     };
     for (const r of data.rooms) {
-      r.settings.mode ??= 'KNOCKOUT';
+      r.settings.mode = normalizeMode(r.settings.mode ?? 'KNOCKOUT');
       if (r.match && migrateRevenge(r.match)) {
         r.match.revision++;
         r.version++;
         r.events = [];
       }
-      if (r.match && r.match.mode !== 'REVENGE' && r.match.rulesVersion !== 2) {
+      if (r.match && !isRevenge(r.match.mode) && r.match.rulesVersion !== 2) {
         const match = r.match;
         match.rulesVersion = 2;
         match.winnerTeam = null;
@@ -211,7 +211,7 @@ export function createGameService(options: Options = {}) {
       selfId: id,
       legal: room.match && !room.pause ? legalMoves(room.match, id) : [],
       serverNow: now(),
-      ...(room.settings.mode === 'REVENGE'
+      ...(isRevenge(room.settings.mode)
         ? {
             chat: chats.get(room.code) ?? [],
             reactions: (reactions.get(room.code) ?? []).filter(
@@ -385,8 +385,8 @@ export function createGameService(options: Options = {}) {
       attach(guest, room, !!x.spectate);
     } else if (x.type === 'quick') {
       if (guest.roomCode) fail('Leave your current room first.');
-      const mode = x.mode ?? 'KNOCKOUT';
-      if (!['KNOCKOUT', 'KNOCKOUT_2V2', 'REVENGE'].includes(mode))
+      const mode = normalizeMode(x.mode ?? 'KNOCKOUT');
+      if (!MODES.includes(mode as (typeof MODES)[number]))
         fail('Choose an available mode.');
       guest.name = displayName(x.name ?? guest.name);
       if (x.cosmetics) guest.cosmetics = publicCosmetics(x.cosmetics);
@@ -402,7 +402,7 @@ export function createGameService(options: Options = {}) {
         room = makeRoom(guest, {
           mode,
           name: 'Open table',
-          capacity: mode !== 'KNOCKOUT' ? 4 : 2,
+          capacity: isTeamMode(mode) ? 4 : 2,
           private: false,
           timerSeconds: 30,
           spectators: true,
@@ -421,7 +421,7 @@ export function createGameService(options: Options = {}) {
         mutate(room);
         updateDisconnect(room);
       } else if (x.type === 'chat' || x.type === 'reaction') {
-        if (room.settings.mode !== 'REVENGE' || room.match?.phase !== 'PLAYING')
+        if (!isRevenge(room.settings.mode) || room.match?.phase !== 'PLAYING')
           fail('Chat and reactions are available during Revenge matches.');
         if (member.seat === null || !member.connected)
           fail('Only seated players can send messages or reactions.');
@@ -488,7 +488,7 @@ export function createGameService(options: Options = {}) {
       } else if (x.type === 'randomize') {
         if (room.hostId !== guest.id)
           fail('Only the host can randomize teams.');
-        if (room.match || room.settings.mode === 'KNOCKOUT')
+        if (room.match || !isTeamMode(room.settings.mode))
           fail('Randomize teams in a 2v2 lobby.');
         const players = room.members.filter((m) => m.seat !== null);
         if (players.length !== 4)

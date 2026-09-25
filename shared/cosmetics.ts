@@ -1,4 +1,4 @@
-export const BOARD_STYLES = ['classic', 'premium'] as const;
+export const BOARD_STYLES = ['classic', 'premium', 'colorful'] as const;
 export type BoardStyle = (typeof BOARD_STYLES)[number];
 export const AVATARS = [
   {
@@ -71,7 +71,7 @@ export function publicCosmetics(value?: Partial<Cosmetics> | null): Cosmetics {
   };
 }
 export const boardStyle = (value: unknown): BoardStyle =>
-  value === 'classic' ? 'classic' : 'premium';
+  value === 'classic' || value === 'colorful' ? value : 'premium';
 // Shared schema keeps the account client and server's allowed field names aligned.
 export const cosmeticFields = {
   avatar: { type: 'string' as const, defaultValue: 'movo', required: false },

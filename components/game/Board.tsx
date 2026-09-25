@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { projectBoardPoint, viewSeat } from '../../shared/board-view';
 import { stackPresentation } from '../../shared/stack-presentation';
 import type { PieceMotion } from '../../shared/motion';
 import type { RevengeState } from '../../shared/revenge-types';
@@ -31,6 +32,8 @@ export interface BoardPiece {
   number: number;
   position: Position;
   hasUsedHalki?: boolean;
+  hasCaptured?: boolean;
+  homeEntryWaived?: boolean;
 }
 export const demoPieces: BoardPiece[] = Array.from({ length: 16 }, (_, i) => {
   const seat = Math.floor(i / 4) as Seat,
@@ -53,6 +56,7 @@ export const demoPieces: BoardPiece[] = Array.from({ length: 16 }, (_, i) => {
 });
 export const Board = memo(function Board({
   pieces = demoPieces,
+  viewerSeat,
   legal = [],
   onMove,
   unlocked = [],
@@ -76,6 +80,7 @@ export const Board = memo(function Board({
   impact,
 }: {
   pieces?: BoardPiece[];
+  viewerSeat?: Seat | null;
   legal?: string[];
   onMove?: (id: string) => void;
   unlocked?: number[];
@@ -105,7 +110,14 @@ export const Board = memo(function Board({
   } | null;
 }) {
   const preferredTheme = useBoardStyle();
-  const premium = (theme ?? preferredTheme) === 'premium';
+  const style = theme ?? preferredTheme;
+  const colorful = style === 'colorful';
+  const premium = style !== 'classic';
+  const project = (p: { x: number; y: number }) =>
+    projectBoardPoint(p, viewerSeat);
+  const colors = colorful
+    ? ['#c83f37', '#18845e', '#d8a21a', '#2b68b3']
+    : COLORS;
   const uid = useId().replaceAll(':', '');
   const at = (n: number) => 36 + n * 32;
   const renderPieces = pieces.map((p) => ({
@@ -139,8 +151,9 @@ export const Board = memo(function Board({
   return (
     <div className="board-interaction">
       <svg
-        className={`movo-board board-${premium ? 'premium' : 'classic'} ${effect ?? ''}`}
-        data-board-theme={premium ? 'premium' : 'classic'}
+        className={`movo-board board-${style} ${effect ?? ''}`}
+        data-board-theme={style}
+        data-viewer-seat={viewerSeat ?? 'spectator'}
         viewBox="0 0 520 534"
         role="group"
         aria-label={label}
@@ -188,8 +201,8 @@ export const Board = memo(function Board({
           <path
             className="board-side-cue"
             d="M52 519H468"
-            transform={`rotate(${active * 90} 260 260)`}
-            stroke={COLORS[active]}
+            transform={`rotate(${viewSeat(active as Seat, viewerSeat) * 90} 260 260)`}
+            stroke={colors[active]}
             strokeWidth="4"
             strokeLinecap="round"
           />
@@ -240,7 +253,9 @@ export const Board = memo(function Board({
           strokeOpacity=".5"
         />
         {[0, 1, 2, 3].map((s) => {
-          const cells = [0, 1, 2, 3].map((i) => baseCell(s as Seat, i));
+          const cells = [0, 1, 2, 3].map((i) =>
+            project(baseCell(s as Seat, i)),
+          );
           const cx = cells.reduce((sum, c) => sum + at(c.x), 0) / 4,
             cy = cells.reduce((sum, c) => sum + at(c.y), 0) / 4;
           return (
@@ -254,9 +269,9 @@ export const Board = memo(function Board({
                 width="146"
                 height="146"
                 rx="27"
-                fill={COLORS[s]}
-                fillOpacity={premium ? '.12' : '.065'}
-                stroke={COLORS[s]}
+                fill={colors[s]}
+                fillOpacity={colorful ? '.25' : premium ? '.12' : '.065'}
+                stroke={colors[s]}
                 strokeOpacity={active === s ? '.8' : '.3'}
                 strokeWidth={active === s ? '2' : '1'}
               />
@@ -264,12 +279,12 @@ export const Board = memo(function Board({
                 x={cx}
                 y={cy - 50}
                 textAnchor="middle"
-                fill={COLORS[s]}
+                fill={colors[s]}
                 fontSize="9"
                 fontWeight="700"
                 letterSpacing="3"
               >
-                {['EMBER', 'GROVE', 'GOLD', 'TIDE'][s]}
+                {['RED', 'GREEN', 'YELLOW', 'BLUE'][s]}
               </text>
               {cells.map((c, i) => (
                 <g key={i}>
@@ -279,7 +294,7 @@ export const Board = memo(function Board({
                     r="21"
                     fill="#b0a18a"
                     fillOpacity=".12"
-                    stroke={COLORS[s]}
+                    stroke={colors[s]}
                     strokeOpacity=".25"
                   />
                   <circle
@@ -300,12 +315,16 @@ export const Board = memo(function Board({
                 fontSize="7"
                 letterSpacing="1.5"
               >
-                {unlocked.includes(s) ? 'HOME UNLOCKED' : 'KNOCK TO UNLOCK'}
+                {revengeMode
+                  ? 'EACH PIECE NEEDS A KNOCK'
+                  : unlocked.includes(s)
+                    ? 'HOME UNLOCKED'
+                    : 'KNOCK TO UNLOCK'}
               </text>
             </g>
           );
         })}
-        {TRACK.map((t) => (
+        {TRACK.map((tile) => ({ ...tile, ...project(tile) })).map((t) => (
           <g key={t.id} className="board-tile" data-square={t.id}>
             <title>
               {(t.safe ? 'Safe space ' : 'Shared route ') + (t.index + 1)}
@@ -348,13 +367,13 @@ export const Board = memo(function Board({
           </g>
         ))}
         {HOME_GATES.map((index, s) => {
-          const t = TRACK[index],
+          const t = project(TRACK[index]),
             open = unlocked.includes(s);
           return (
             <g
               key={`gate-${s}`}
               className={`home-gate ${open ? 'gate-open' : ''} ${effectSeat === s ? 'gate-react' : ''}`}
-              transform={`translate(${at(t.x)} ${at(t.y)}) rotate(${s * 90})`}
+              transform={`translate(${at(t.x)} ${at(t.y)}) rotate(${viewSeat(s as Seat, viewerSeat) * 90})`}
             >
               <title>{`Home Gate ${s + 1} · Exposed and knockable · ${open ? 'Home unlocked' : 'Get 1 knock to enter'}`}</title>
               <rect
@@ -364,26 +383,26 @@ export const Board = memo(function Board({
                 height="28"
                 rx="5"
                 fill="#ddc9a5"
-                stroke={COLORS[s]}
+                stroke={colors[s]}
                 strokeWidth="1.6"
               />
               <path
                 d="M-10 -6v-5h20v5M-7 -8v16M7 -8v16"
                 fill="none"
-                stroke={COLORS[s]}
+                stroke={colors[s]}
                 strokeWidth="2"
               />
               <path
                 className="gate-bar"
                 d={open ? 'M-7 0l-3 -6M7 0l3 -6' : 'M-7 0h14'}
                 fill="none"
-                stroke={COLORS[s]}
+                stroke={colors[s]}
                 strokeWidth="2.4"
               />
               {premium && !open && (
                 <path
                   d="M-3 1V-2a3 3 0 0 1 6 0V1M-4 1h8v7h-8Z"
-                  stroke={COLORS[s]}
+                  stroke={colors[s]}
                   fill="#eee4cd"
                   strokeWidth="1.2"
                 />
@@ -393,7 +412,7 @@ export const Board = memo(function Board({
         })}
         {[0, 1, 2, 3].flatMap((s) =>
           Array.from({ length: LANE_LENGTH }, (_, i) => {
-            const c = laneCell(s as Seat, i);
+            const c = project(laneCell(s as Seat, i));
             return (
               <g
                 key={`${s}-${i}`}
@@ -405,24 +424,26 @@ export const Board = memo(function Board({
                   width="28"
                   height="28"
                   rx="7"
-                  fill={COLORS[s]}
+                  fill={colors[s]}
                   fillOpacity={
-                    unlocked.includes(s)
-                      ? premium
-                        ? '.76'
-                        : '.55'
-                      : premium
-                        ? '.35'
-                        : '.22'
+                    colorful
+                      ? '.78'
+                      : unlocked.includes(s)
+                        ? premium
+                          ? '.76'
+                          : '.55'
+                        : premium
+                          ? '.35'
+                          : '.22'
                   }
-                  stroke={COLORS[s]}
+                  stroke={colors[s]}
                   strokeOpacity=".5"
                 />
                 <circle
                   cx={at(c.x)}
                   cy={at(c.y)}
                   r="2"
-                  fill={COLORS[s]}
+                  fill={colors[s]}
                   opacity=".6"
                 />
               </g>
@@ -454,8 +475,29 @@ export const Board = memo(function Board({
         >
           MOVO
         </text>
+        {[0, 1, 2, 3].flatMap((seat) =>
+          [0, 1, 2, 3].map((number) => {
+            const c = project(
+              coordinates({ kind: 'HOME' }, seat as Seat, number),
+            );
+            return (
+              <circle
+                key={`finish-${seat}-${number}`}
+                className="finish-slot"
+                data-finish-slot={`${seat}:${number}`}
+                cx={at(c.x)}
+                cy={at(c.y)}
+                r="7"
+                fill={colors[seat]}
+                fillOpacity=".16"
+                stroke={colors[seat]}
+                strokeOpacity=".5"
+              />
+            );
+          }),
+        )}
         {revenge?.shields.map((shield) => {
-          const c = TRACK[shield.index],
+          const c = project(TRACK[shield.index]),
             contested = revenge.contests.some((x) => x.index === shield.index);
           return (
             <g
@@ -502,7 +544,7 @@ export const Board = memo(function Board({
         {revenge?.contests
           .filter((contest) => !contest.shields.length)
           .map((contest) => {
-            const c = TRACK[contest.index];
+            const c = project(TRACK[contest.index]);
             return (
               <g
                 key={`contest-${contest.index}`}
@@ -529,7 +571,7 @@ export const Board = memo(function Board({
             );
           })}
         {targets.map((p, i) => {
-          const c = coordinates(p, 0, 0);
+          const c = project(coordinates(p, 0, 0));
           return (
             <circle
               key={i}
@@ -556,17 +598,23 @@ export const Board = memo(function Board({
             top,
             occupants,
           }) => {
-            const c = coordinates(p.position, p.seat, p.number),
+            const c = project(coordinates(p.position, p.seat, p.number)),
               locked =
                 p.position.kind === 'HOME_GATE_LOCKED' &&
-                !unlocked.includes(p.seat);
+                (revengeMode
+                  ? !p.hasCaptured && !p.homeEntryWaived
+                  : !unlocked.includes(p.seat));
             const halki = p.position.kind.startsWith('HALKI_');
             let numberX = 12,
               numberY = 14;
             if (p.position.kind === 'HOME') {
               // Keep Finish labels toward the centre, clear of the outer route.
               numberY = -14;
-              for (let n = 0; n < (p.position.homeSeat ?? p.seat); n++)
+              for (
+                let n = 0;
+                n < viewSeat(p.position.homeSeat ?? p.seat, viewerSeat);
+                n++
+              )
                 [numberX, numberY] = [-numberY, numberX];
             }
             return (
@@ -590,7 +638,7 @@ export const Board = memo(function Board({
                       cy="6"
                       rx="14"
                       ry="7"
-                      fill={COLORS[p.seat]}
+                      fill={colors[p.seat]}
                       stroke="#2e3428"
                       strokeWidth="1"
                     />
@@ -674,14 +722,14 @@ export const Board = memo(function Board({
                           <circle
                             r="17"
                             fill="none"
-                            stroke={COLORS[p.seat]}
+                            stroke={colors[p.seat]}
                             strokeWidth="2.5"
                             strokeDasharray="26 5"
                           />
                           <path
                             d="M-14 -11l-5 1 1-5"
                             fill="none"
-                            stroke={COLORS[p.seat]}
+                            stroke={colors[p.seat]}
                             strokeWidth="2"
                           />
                           <rect
@@ -733,7 +781,7 @@ export const Board = memo(function Board({
                         <circle
                           r="17"
                           fill="none"
-                          stroke={COLORS[p.seat]}
+                          stroke={colors[p.seat]}
                           strokeDasharray="2 4"
                           strokeWidth="1.3"
                         />
@@ -743,7 +791,7 @@ export const Board = memo(function Board({
                           className="legal-ring"
                           r="18"
                           fill="none"
-                          stroke={COLORS[p.seat]}
+                          stroke={colors[p.seat]}
                           strokeWidth="1.5"
                         />
                       )}
@@ -756,7 +804,7 @@ export const Board = memo(function Board({
                       />
                       <path
                         d="M-12 -2 C-12 -14 12 -14 12 -2 L13 4 C12 16 -12 16 -13 4 Z"
-                        fill={COLORS[p.seat]}
+                        fill={colors[p.seat]}
                         stroke="#473b2d"
                         strokeOpacity=".25"
                       />
@@ -764,7 +812,7 @@ export const Board = memo(function Board({
                         cy="-3"
                         rx="11.5"
                         ry="10"
-                        fill={COLORS[p.seat]}
+                        fill={colors[p.seat]}
                       />
                       <ellipse
                         className="token-rim"
@@ -849,7 +897,7 @@ export const Board = memo(function Board({
         )}
         {impact &&
           (() => {
-            const c = coordinates(impact.at, impact.seat as Seat, 0);
+            const c = project(coordinates(impact.at, impact.seat as Seat, 0));
             return (
               <g
                 key={impact.key}
@@ -860,12 +908,12 @@ export const Board = memo(function Board({
                 <circle
                   r="20"
                   fill="none"
-                  stroke={COLORS[impact.seat]}
+                  stroke={colors[impact.seat]}
                   strokeWidth="3"
                 />
                 <path
                   d="M-26 0h-7M26 0h7M0-26v-7M0 26v7"
-                  stroke={COLORS[impact.seat]}
+                  stroke={colors[impact.seat]}
                   strokeWidth="2"
                 />
                 {impact.count > 1 && (
@@ -881,18 +929,6 @@ export const Board = memo(function Board({
               </g>
             );
           })()}
-        <text
-          x="260"
-          y="494"
-          textAnchor="middle"
-          fill="#897657"
-          fontSize="6"
-          letterSpacing="3"
-        >
-          {revengeMode
-            ? 'REVENGE · WINNING ISN’T SAFE'
-            : 'THE ORIGINAL KNOCKOUT BOARD'}
-        </text>
       </svg>
       {onMove && pickerItems.length > 1 && (
         <div
@@ -912,7 +948,7 @@ export const Board = memo(function Board({
           <div>
             {pickerItems.map(({ piece: p }) => (
               <button key={p.id} onClick={() => choose(p.id)}>
-                <span style={{ color: COLORS[p.seat] }}>{MARKS[p.seat]}</span>
+                <span style={{ color: colors[p.seat] }}>{MARKS[p.seat]}</span>
                 Piece {p.number + 1}
                 <small>
                   {p.position.kind.startsWith('HALKI_') ? 'HALKI' : 'NORMAL'}
@@ -996,7 +1032,9 @@ const PieceToken = memo(function PieceToken({
       style={{ transform: target }}
     >
       <g ref={body} className="piece-body">
-        {children}
+        <g transform={piece.position.kind === 'HOME' ? 'scale(.5)' : undefined}>
+          {children}
+        </g>
       </g>
     </g>
   );

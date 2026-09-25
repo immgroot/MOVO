@@ -1,8 +1,9 @@
+import { isRevenge } from './modes';
 import type { Match } from './game';
 /** Local interaction labels, never additional server/public piece metadata. */
 export function localPieceNumbers(match: Match, selfId: string): string[] {
   if (
-    match.mode !== 'REVENGE' ||
+    !isRevenge(match.mode) ||
     match.phase !== 'PLAYING' ||
     match.revenge?.beneficiaryId !== selfId ||
     match.revenge.secured.includes(selfId)

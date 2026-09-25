@@ -9,9 +9,10 @@ import {
 import { revengeRules } from './revenge';
 import type { RevengeState } from './revenge-types';
 import { RuleError } from './errors';
+import { isRevenge, isTeamMode, type Mode } from './modes';
+export type { Mode } from './modes';
 export { RuleError } from './errors';
 export const PROTOCOL_VERSION = 1;
-export type Mode = 'KNOCKOUT' | 'KNOCKOUT_2V2' | 'REVENGE';
 export type Team = 'A' | 'B';
 export const teamForSeat = (seat: Seat): Team => (seat % 2 === 0 ? 'A' : 'B');
 export interface Player {
@@ -34,6 +35,10 @@ export interface Piece {
   /** Revenge lifetime state; absent in KNOCKOUT. */
   hasUsedHalki?: boolean;
   halkiInvadedHomeOwnerId?: string | null;
+  /** Revenge capture credit belongs to the physical piece. */
+  hasCaptured?: boolean;
+  /** Solo global-stalemate escape; never counts as a capture. */
+  homeEntryWaived?: boolean;
 }
 export interface Match {
   revenge?: RevengeState;
@@ -72,6 +77,8 @@ export type EventType =
   | 'NO_MOVES'
   | 'PIECE_MOVED'
   | 'PIECE_KNOCKED'
+  | 'MISSED_CAPTURE'
+  | 'STALEMATE_ESCAPED'
   | 'HOME_UNLOCKED'
   | 'HOME_ENTERED'
   | 'PIECE_SECURED'
@@ -109,8 +116,8 @@ export function createMatch(
   now = Date.now(),
   mode: Mode = 'KNOCKOUT',
 ): Match {
-  if (mode === 'REVENGE')
-    return revengeRules.createMatch(id, members, timerSeconds, now);
+  if (isRevenge(mode))
+    return revengeRules.createMatch(id, members, timerSeconds, now, mode);
   if (
     members.length < 2 ||
     members.length > 4 ||
@@ -173,9 +180,7 @@ export function teammates(state: Match, a: string, b: string) {
     second = state.players.find((p) => p.id === b);
   return (
     a === b ||
-    ((state.mode === 'KNOCKOUT_2V2' || state.mode === 'REVENGE') &&
-      !!first?.team &&
-      first.team === second?.team)
+    (isTeamMode(state.mode) && !!first?.team && first.team === second?.team)
   );
 }
 export function homeCount(state: Match, playerId: string) {
@@ -193,8 +198,17 @@ export function legalMoves(
   playerId: string,
   roll?: number | null,
 ): Move[] {
-  if (state.mode === 'REVENGE')
+  if (isRevenge(state.mode))
     return revengeRules.legalMoves(state, playerId, roll);
+  return normalMoves(state, playerId, roll);
+}
+/** Shared forward route. Revenge requires personal capture credit and exact dice. */
+export function normalMoves(
+  state: Match,
+  playerId: string,
+  roll?: number | null,
+  pieceHomeAccess = false,
+): Move[] {
   if (roll === undefined) roll = state.dice;
   const player = state.players.find((p) => p.id === playerId);
   if (
@@ -210,9 +224,12 @@ export function legalMoves(
     return [];
   const moves: Move[] = [];
   for (const piece of state.pieces.filter((p) => p.ownerId === playerId)) {
+    const unlocked = pieceHomeAccess
+      ? piece.hasCaptured === true || piece.homeEntryWaived === true
+      : player.homeUnlocked;
     if (
       piece.position.kind === 'HOME' ||
-      (piece.position.kind === 'HOME_GATE_LOCKED' && !player.homeUnlocked) ||
+      (piece.position.kind === 'HOME_GATE_LOCKED' && !unlocked) ||
       (piece.position.kind === 'BASE' && roll !== 6)
     )
       continue;
@@ -222,7 +239,7 @@ export function legalMoves(
       path.push({ kind: 'TRACK', index: STARTS[player.seat], travelled: 0 });
     else
       for (let i = 0; i < roll; i++) {
-        cursor = nextPosition(cursor, player.seat, player.homeUnlocked);
+        cursor = nextPosition(cursor, player.seat, unlocked);
         if (!cursor) break;
         path.push(cursor);
         // Arrival at a locked gate consumes this move; unused pips are lost.
@@ -231,7 +248,7 @@ export function legalMoves(
     if (!path.length) continue;
     const destination = path[path.length - 1];
     if (
-      destination.kind !== 'HOME_GATE_LOCKED' &&
+      (pieceHomeAccess || destination.kind !== 'HOME_GATE_LOCKED') &&
       path.length !== (piece.position.kind === 'BASE' ? 1 : roll)
     )
       continue;
@@ -239,14 +256,19 @@ export function legalMoves(
       ? occupants(state, destination.index, piece.id)
       : [];
     const unsafe = isOuter(destination) && !SAFE_SPACES.has(destination.index);
+    const enemies = targets.filter(
+      (p) => !teammates(state, p.ownerId, playerId),
+    );
+    const shielded = enemies.some((a) =>
+      enemies.some(
+        (b) =>
+          a.ownerId !== b.ownerId && teammates(state, a.ownerId, b.ownerId),
+      ),
+    );
     moves.push({
       pieceId: piece.id,
       path,
-      knockIds: unsafe
-        ? targets
-            .filter((p) => !teammates(state, p.ownerId, playerId))
-            .map((p) => p.id)
-        : [],
+      knockIds: unsafe && !shielded ? enemies.map((p) => p.id) : [],
       stopsAtGate: destination.kind === 'HOME_GATE_LOCKED',
     });
   }
@@ -281,7 +303,7 @@ export function resolveRoll(
   roll: number,
   now = Date.now(),
 ): Resolution {
-  if (original.mode === 'REVENGE')
+  if (isRevenge(original.mode))
     return revengeRules.roll(original, playerId, roll, now);
   checkTurn(original, playerId);
   if (original.dice !== null)
@@ -312,12 +334,14 @@ export function resolveMove(
   targetId?: string,
   dieId?: string,
 ): Resolution {
-  if (original.mode === 'REVENGE')
+  if (isRevenge(original.mode))
     return revengeRules.move(original, playerId, pieceId, now, targetId, dieId);
   checkTurn(original, playerId);
-  const move = legalMoves(original, playerId).find(
-    (m) => m.pieceId === pieceId,
+  const options = legalMoves(original, playerId);
+  const missed = options.filter(
+    (m) => m.knockIds.length && m.pieceId !== pieceId,
   );
+  const move = options.find((m) => m.pieceId === pieceId);
   if (!move) throw new RuleError('That piece cannot use this roll.');
   const state = structuredClone(original),
     events: GameEvent[] = [];
@@ -360,6 +384,16 @@ export function resolveMove(
     events.push({ type: 'HOME_ENTERED', playerId, pieceId });
   if (piece.position.kind === 'HOME')
     events.push({ type: 'PIECE_SECURED', playerId, pieceId });
+  for (const ignored of missed) {
+    const offender = state.pieces.find((p) => p.id === ignored.pieceId)!;
+    events.push({
+      type: 'MISSED_CAPTURE',
+      playerId,
+      pieceId: offender.id,
+      from: offender.position,
+    });
+    offender.position = { kind: 'BASE' };
+  }
   state.revision++;
   const finished = homeCount(state, playerId) === 4;
   const won =
@@ -385,7 +419,7 @@ export function resolveMove(
   return { state, events };
 }
 export function resolveTimeout(original: Match, now = Date.now()): Resolution {
-  if (original.mode === 'REVENGE') return revengeRules.timeout(original, now);
+  if (isRevenge(original.mode)) return revengeRules.timeout(original, now);
   if (
     original.phase !== 'PLAYING' ||
     original.deadline === null ||
@@ -403,7 +437,7 @@ export function resolveForfeit(
   playerId: string,
   now = Date.now(),
 ): Resolution {
-  if (original.mode === 'REVENGE')
+  if (isRevenge(original.mode))
     return revengeRules.forfeit(original, playerId, now);
   if (
     original.phase !== 'PLAYING' ||

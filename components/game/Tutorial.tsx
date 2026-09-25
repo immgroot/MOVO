@@ -47,7 +47,7 @@ const knockoutLessons = [
     copy: 'NIDA is 3 spaces ahead. GROOT rolls 3 and lands exactly on her. Her piece returns to Base; GROOT earns a knock.',
     before: 'GROOT: 0 KNOCKS · NIDA: 3 AHEAD',
     after: 'NIDA → BASE · GROOT: 1 KNOCK',
-    note: 'Every enemy piece on an exposed landing space is knocked. Sharing a tile gives no extra protection.',
+    note: 'Each piece that ignores its own legal capture returns to Base and needs six to reopen, even if another piece captures. In 2v2, different teammates together form a shield; same-owner stacks do not.',
   },
   {
     title: 'NO KNOCK. NO HOME.',

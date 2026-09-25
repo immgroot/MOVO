@@ -27,11 +27,11 @@ const lessons = [
     'The piece stops at its actual Home Gate. It cannot enter Home, pass the door or begin a second lap.',
   ),
   lesson(
-    'ANOTHER PIECE CAN OPEN IT',
-    'One GROOT piece is waiting at the Home Door. Another GROOT piece knocks KIV. GROOT’s Home unlocks for all four pieces.',
+    'EACH PIECE EARNS HOME',
+    'One GROOT piece is waiting at the Home Door. Another GROOT piece knocks KIV. Only that attacking piece earns Home entry.',
     'PIECE 1 WAITING · PIECE 2 ATTACKS',
-    'HOME UNLOCKED · WAITING PIECE STAYS',
-    'The waiting piece enters on a future legal roll. Unlocking never teleports it. The first valid kill unlocks Home for the rest of the match.',
+    'ATTACKER UNLOCKED · WAITING PIECE STAYS LOCKED',
+    'The waiting piece still needs its own capture. Home entry uses the full die exactly; extra movement is never discarded.',
   ),
   lesson(
     'ONE OWNER. NO SHIELD.',
@@ -108,7 +108,7 @@ const lessons = [
     'Halki can capture one or two enemies when no special shield prevents it. Three or more survive. If three become two, capture happens only when that remaining composition is killable.',
     'HALKI CONTESTS THREE NORMALS',
     'ONE LEAVES · TWO → BASE',
-    'No partial capture. Halki overrides normal Safe protection, but cannot defeat a protected teammate shield containing Halki. An available legal Halki kill is compulsory.',
+    'No partial capture. Halki overrides normal Safe protection, but respects every genuine teammate shield. An active Halki is not a compulsory move.',
   ),
   lesson(
     'DEATH DOES NOT RESET ITS LIFE',
@@ -140,10 +140,10 @@ const lessons = [
   ),
   lesson(
     'EVERY ROLL IS REAL.',
-    'Six gives another roll. Six gives another roll. Four ends collection. The turn pool contains 6, 6, 4: three separate dice, with no three-six penalty.',
+    'Six gives another roll. Six gives another roll. Four ends collection. The turn pool contains 6, 6, 4: three separate dice, with all three results kept individually.',
     'ROLL 6 → ROLL AGAIN → 6 → 4',
     'TURN ROLLS · 6 USED · 6 USED · 4 USED',
-    'A Halki candidate uses 6B and its immediate four, never 6A plus four. Earlier dice remain playable. Keep rolling for as many usable sixes as the dice produces.',
+    'A Halki candidate uses 6B and its immediate four, never 6A plus four. Earlier dice remain playable in order. Wait for the first non-six: a streak of 3, 6, 9 or another multiple of three burns all its sixes; the non-six stays usable.',
   ),
 ];
 const track = (index: number, travelled = 10): Position => ({
@@ -151,7 +151,7 @@ const track = (index: number, travelled = 10): Position => ({
   index,
   travelled,
 });
-function scene(step: number) {
+function scene(step: number, solo = false) {
   const s = createMatch(
     'revenge-guide',
     ['GROOT', 'KIV', 'NIDA', 'NOOR'].map((name, seat) => ({
@@ -161,13 +161,16 @@ function scene(step: number) {
     })),
     0,
     0,
-    'REVENGE',
+    solo ? 'REVENGE_SOLO' : 'REVENGE_TEAM',
   );
   const ids = s.players.map((p) => p.id),
     stages: { state: Match; events: GameEvent[] }[] = [];
   const open = (seat: number) => {
     s.players[seat].homeUnlocked = true;
     s.players[seat].knocked = 1;
+    s.pieces
+      .filter((p) => p.seat === seat)
+      .forEach((p) => (p.hasCaptured = true));
   };
   const special = (piece: number, position: Position) => {
     s.pieces[piece].position = position;
@@ -208,7 +211,7 @@ function scene(step: number) {
   };
   if (step === 0) {
     s.pieces[0].position = track(49, 49);
-    stages.push(play(s, 0, 3, 0));
+    stages.push(play(s, 0, 1, 0));
   }
   if (step === 1) {
     s.pieces[0].position = {
@@ -389,24 +392,27 @@ const guide = {
   details: (
     <>
       <p>
-        A usable six gives another roll. Keep rolling if you keep getting sixes;
-        REVENGE has no automatic third-six penalty. Six alone never opens Halki.
-        Collect your rolls, then use every available die separately. The pool
-        preserves the exact bonus relationship and marks used values. A matching
-        Home birth is optional unless exactly three pieces are finished and one
-        is unfinished. Declining keeps both dice; accepting consumes only its
-        pair.
+        Every six gives another roll. Wait for the first non-six before
+        deciding: streaks of 3, 6, 9 or another multiple of three burn all their
+        sixes. Otherwise all results remain usable. The non-six never burns. Six
+        alone never opens Halki. Collect your rolls, then use every available
+        die separately and in order. If the current die has no legal move, later
+        dice are forfeited. The pool preserves the exact bonus relationship and
+        marks used values. A matching Home birth is optional unless exactly
+        three pieces are finished and one is unfinished. Declining keeps both
+        dice; accepting consumes only its pair.
       </p>
       <p>
         KNOCK TO UNLOCK HOME. Complete your lap without a knock? Your piece
-        stops at your Home Gate. Get a knock with any of your pieces to unlock
-        Home and continue on a future roll.
+        stops at your Home Gate. That physical piece must earn its own knock to
+        enter Home. Every move must use the full die, including at the Home
+        door.
       </p>
       <p>
         Same-player normal stacks can be captured together. Both teammate owners
-        create Team Shield; a shield containing Halki resists normal and Halki
-        attackers. One Halki can capture at most two enemies where no special
-        shield prevents it.
+        create Team Shield; every genuine teammate shield resists normal and
+        Halki attackers. One Halki can capture at most two enemies where no
+        special shield prevents it.
       </p>
       <p>
         ONE HALKI LIFE PER PIECE. Activation needs an unused finished piece,
@@ -426,7 +432,49 @@ const guide = {
 export { scene as revengeGuideScene };
 export default function RevengeTutorial(props: {
   reduced: boolean;
+  solo?: boolean;
   onDone: () => void;
 }) {
-  return <Tutorial {...props} guide={guide} />;
+  const indices = lessons
+    .map((_, i) => i)
+    .filter((i) => ![3, 4, 6, 14, 15].includes(i));
+  const soloGuide = {
+    ...guide,
+    lessons: indices.map((i) =>
+      i === 0
+        ? lesson(
+            'REVENGE SOLO',
+            'Two, three or four individual rivals. First player with all four pieces finished wins. No teammates, shields or support turns.',
+            '2–4 INDIVIDUAL PLAYERS',
+            'FOUR HOME · YOU WIN',
+            'Every piece needs its own capture before entering Home. All dice, Halki and exact-movement rules are shared with Revenge Team.',
+          )
+        : lessons[i],
+    ),
+    scene: (step: number) => scene(indices[step], true),
+    details: (
+      <>
+        <p>
+          REVENGE SOLO: no teammates, team shields or support turns. First to
+          finish four wins. Use dice in order; completed six streaks divisible
+          by three burn only when a non-six ends them.
+        </p>
+        <p>
+          Each physical piece needs its own capture to enter Home. Each unused
+          finished piece may become Halki once, using its exact six-plus-Home
+          pair and a real target. Halki is required only with three finished
+          pieces and one normal unfinished piece. It returns to the same Home it
+          invaded.
+        </p>
+        <p>
+          If every unfinished piece in the entire Solo match is trapped at its
+          own Home door, with no capture or Halki action that can break the
+          deadlock, those trapped pieces receive a Home-entry waiver. Nothing
+          moves or finishes automatically. Exact dice and normal turn order
+          still apply.
+        </p>
+      </>
+    ),
+  };
+  return <Tutorial {...props} guide={props.solo ? soloGuide : guide} />;
 }

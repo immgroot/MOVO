@@ -7,6 +7,7 @@ import {
   teamProgress,
   type Mode,
 } from '../shared/game';
+import { isTeamMode } from '../shared/modes';
 import type { Seat } from '../shared/topology';
 describe('complete reproducible matches', () => {
   for (const [count, mode] of [
@@ -14,7 +15,10 @@ describe('complete reproducible matches', () => {
     [3, 'KNOCKOUT'],
     [4, 'KNOCKOUT'],
     [4, 'KNOCKOUT_2V2'],
-    [4, 'REVENGE'],
+    [4, 'REVENGE_TEAM'],
+    [2, 'REVENGE_SOLO'],
+    [3, 'REVENGE_SOLO'],
+    [4, 'REVENGE_SOLO'],
   ] as [number, Mode][])
     for (const seed of [13, 27, 59, 101])
       it(`${mode}, ${count} players, seed ${seed}: finishes with valid positions and the required Home count`, () => {
@@ -95,7 +99,7 @@ describe('complete reproducible matches', () => {
         }
         expect(s.phase).toBe('FINISHED');
         expect(s.winReason).toBe('HOME');
-        if (mode !== 'KNOCKOUT') expect(teamProgress(s, s.winnerTeam!)).toBe(8);
+        if (isTeamMode(mode)) expect(teamProgress(s, s.winnerTeam!)).toBe(8);
         expect(
           s.pieces.filter(
             (p) => p.ownerId === s.winner && p.position.kind === 'HOME',

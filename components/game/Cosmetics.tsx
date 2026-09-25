@@ -47,13 +47,13 @@ export function BoardSelector({
     <fieldset className="board-selector">
       <legend>BOARD STYLE</legend>
       <div>
-        {(['classic', 'premium'] as const).map((style) => (
+        {(['classic', 'premium', 'colorful'] as const).map((style) => (
           <button
             type="button"
             key={style}
             disabled={disabled}
             aria-pressed={value === style}
-            aria-label={`MOVO ${style === 'classic' ? 'Classic' : 'Premium'}`}
+            aria-label={`MOVO ${style === 'classic' ? 'Classic' : style === 'colorful' ? 'Colorful' : 'Premium'}`}
             onClick={() => onChange(style)}
           >
             <svg
@@ -87,7 +87,13 @@ export function BoardSelector({
                   height="22"
                   rx="6"
                   fill={c as string}
-                  opacity={style === 'classic' ? '.35' : '.75'}
+                  opacity={
+                    style === 'colorful'
+                      ? '1'
+                      : style === 'classic'
+                        ? '.35'
+                        : '.75'
+                  }
                 />
               ))}
               <path
@@ -104,11 +110,13 @@ export function BoardSelector({
                 M
               </text>
             </svg>
-            <span>MOVO {style === 'classic' ? 'CLASSIC' : 'PREMIUM'}</span>
+            <span>MOVO {style.toUpperCase()}</span>
             <small>
               {style === 'classic'
                 ? 'The familiar original'
-                : 'Crafted for rivalry'}
+                : style === 'colorful'
+                  ? 'Four colors. Your table.'
+                  : 'Crafted for rivalry'}
             </small>
           </button>
         ))}

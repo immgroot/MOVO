@@ -5,6 +5,7 @@ import {
   type Team,
   type GameEvent,
 } from './game';
+import { isTeamMode } from './modes';
 import { RuleError } from './errors';
 import { SAFE_SPACES, positionKey } from './topology';
 
@@ -26,6 +27,7 @@ export function squarePieces(s: Match, at: Piece) {
   );
 }
 export function shieldTeams(s: Match, pieces: Piece[]): Team[] {
+  if (!isTeamMode(s.mode)) return [];
   return (['A', 'B'] as Team[]).filter(
     (t) =>
       new Set(pieces.filter((p) => team(s, p) === t).map((p) => p.ownerId))
@@ -66,12 +68,16 @@ function kill(
         pieceId: victim.id,
       });
   }
-  if (captured && !player.homeUnlocked) {
+  if (captured && !attacker.hasCaptured) {
+    attacker.hasCaptured = true;
     player.homeUnlocked = true;
-    for (const p of s.pieces)
-      if (p.ownerId === player.id && p.position.kind === 'HOME_GATE_LOCKED')
-        p.position = { ...p.position, kind: 'TRACK' };
-    events.push({ type: 'HOME_UNLOCKED', playerId: player.id });
+    if (attacker.position.kind === 'HOME_GATE_LOCKED')
+      attacker.position = { ...attacker.position, kind: 'TRACK' };
+    events.push({
+      type: 'HOME_UNLOCKED',
+      playerId: player.id,
+      pieceId: attacker.id,
+    });
   }
 }
 /** One decision shared by actual collisions and compulsory activation targets. */
@@ -89,10 +95,7 @@ export function canCapture(s: Match, attacker: Piece, defenders: Piece[]) {
   )
     return false;
   const shields = shieldTeams(s, defenders);
-  if (isHalki(attacker))
-    return (
-      defenders.length <= 2 && !(shields.length && defenders.some(isHalki))
-    );
+  if (isHalki(attacker)) return defenders.length <= 2 && !shields.length;
   if (safe(attacker) || shields.length) return false;
   // A single owner's stack gets no protection, including its Halki pieces.
   return new Set(defenders.map((p) => p.ownerId)).size === 1;
@@ -222,7 +225,8 @@ export function syncSquares(
         events.push({ type: 'SHIELD_CREATED', playerId: pieces[0].ownerId });
     }
     if (
-      new Set(pieces.map((p) => team(s, p))).size < 2 ||
+      new Set(pieces.map((p) => (isTeamMode(s.mode) ? team(s, p) : p.ownerId)))
+        .size < 2 ||
       (!shields.length &&
         !pieces.some(isHalki) &&
         (safe(pieces[0]) || pieces.length < 3))

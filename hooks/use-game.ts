@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { Snapshot, Intent, Reply, Welcome } from '../shared/protocol';
+import { isRevenge } from '../shared/modes';
+import { DICE_ROLL_MS, DICE_REDUCED_MS } from '../shared/dice-presentation';
 import type { GameEvent } from '../shared/game';
 import type { Position } from '../shared/topology';
 import { hopDuration, type PieceMotion } from '../shared/motion';
@@ -31,13 +33,19 @@ function eventText(e: GameEvent, s: Snapshot) {
     case 'NO_MOVES':
       return 'No legal moves. Next player.';
     case 'SIX_BURNED':
-      return s.match?.mode === 'REVENGE'
-        ? 'Keep rolling. Sixes have no limit.'
+      return s.match && isRevenge(s.match.mode)
+        ? `${e.value} sixes burned. The non-six remains usable.`
         : 'Three sixes. This roll is forfeited.';
     case 'HOME_UNLOCKED':
-      return `${n} · Home unlocked!`;
+      return e.pieceId
+        ? `${n}'s piece ${Number(e.pieceId.split(':').at(-1)) + 1} can enter Home.`
+        : `${n} · Home unlocked!`;
     case 'HOME_LOCKED':
       return 'HOME LOCKED · GET 1 KNOCK. The gate is not safe.';
+    case 'STALEMATE_ESCAPED':
+      return 'SOLO STALEMATE ESCAPE · Trapped pieces can enter Home. Exact dice still apply.';
+    case 'MISSED_CAPTURE':
+      return `${n}'s piece ${Number(e.pieceId?.split(':').at(-1)) + 1} missed a legal capture and returns to Base.`;
     case 'PIECE_KNOCKED':
       return `${n} knocked ${s.match?.players.find((p) => p.id === e.targetId)?.name ?? 'a rival'}!`;
     case 'HOME_ENTERED':
@@ -230,9 +238,10 @@ export function useGame() {
               );
             if (!reduced) await sleep(e.type === 'HALKI_ACTIVATED' ? 450 : 280);
           } else if (e.type === 'DICE_ROLLED') {
+            setDie(e.value!);
             setEffect('dice-rolling');
             playSound('dice', preferences.current);
-            if (!reduced) await sleep(640);
+            await sleep(reduced ? DICE_REDUCED_MS : DICE_ROLL_MS);
             if (generation !== epoch.current) return;
             setDie(e.value!);
             playSound('diceLand', preferences.current);
@@ -344,6 +353,24 @@ export function useGame() {
             );
             setCaptureMotions([]);
             setImpact(null);
+          } else if (e.type === 'MISSED_CAPTURE' && e.pieceId) {
+            const duration = reduced ? 45 : 420;
+            setMotion({
+              key: ++motionKey,
+              pieceId: e.pieceId,
+              from: e.from!,
+              duration,
+              kind: 'return',
+              final: true,
+              reduced,
+            });
+            setPositions((prev) => ({
+              ...prev,
+              [e.pieceId!]: { kind: 'BASE' },
+            }));
+            await sleep(duration);
+            if (generation !== epoch.current) return;
+            setMotion(null);
           } else if (e.type === 'HOME_LOCKED') {
             setEffect('home-gate-lock');
             playSound('homeGateLock', preferences.current);
@@ -365,6 +392,7 @@ export function useGame() {
                         ),
                         pieces: prev.match.pieces.map((p) =>
                           p.ownerId === e.playerId &&
+                          (!e.pieceId || p.id === e.pieceId) &&
                           p.position.kind === 'HOME_GATE_LOCKED'
                             ? {
                                 ...p,

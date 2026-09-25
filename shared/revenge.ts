@@ -1,6 +1,7 @@
 import {
   createMatch,
-  legalMoves as knockoutMoves,
+  normalMoves,
+  teammates,
   homeCount,
   teamProgress,
   RuleError,
@@ -9,6 +10,8 @@ import {
   type Resolution,
   type GameEvent,
 } from './game';
+import { isRevenge, isTeamMode, normalizeMode, type Mode } from './modes';
+import { escapeSoloStalemate } from './revenge-stalemate';
 import { HOME_GATES, type Seat, type Position } from './topology';
 import {
   isHalki,
@@ -25,17 +28,26 @@ function create(
   members: { id: string; name: string; seat: Seat }[],
   timerSeconds: number,
   now: number,
+  mode: Mode = 'REVENGE_TEAM',
 ): Match {
-  if (members.length !== 4)
+  if (isTeamMode(mode) && members.length !== 4)
     throw new RuleError('REVENGE needs exactly four players.');
-  const s = createMatch(id, members, timerSeconds, now, 'KNOCKOUT_2V2');
-  s.mode = 'REVENGE';
+  const s = createMatch(
+    id,
+    members,
+    timerSeconds,
+    now,
+    isTeamMode(mode) ? 'KNOCKOUT_2V2' : 'KNOCKOUT',
+  );
+  s.mode = normalizeMode(mode);
   for (const p of s.pieces) {
     p.hasUsedHalki = false;
     p.halkiInvadedHomeOwnerId = null;
+    p.hasCaptured = false;
+    p.homeEntryWaived = false;
   }
   s.revenge = {
-    version: 2,
+    version: 3,
     secured: [],
     support: {},
     beneficiaryId: s.currentPlayerId,
@@ -102,8 +114,8 @@ function advance(s: Match, now: number, events: GameEvent[]) {
     }
   }
   const index = s.players.findIndex((p) => p.id === completed);
-  for (let step = 1; step <= 4; step++) {
-    const p = s.players[(index + step) % 4];
+  for (let step = 1; step <= s.players.length; step++) {
+    const p = s.players[(index + step) % s.players.length];
     if (p.forfeited || (r.secured.includes(p.id) && !r.support[p.id]?.ready))
       continue;
     s.currentPlayerId = p.id;
@@ -178,11 +190,10 @@ function preview(s: Match, m: Move) {
 function candidates(s: Match, actor: string, die: number): Move[] {
   const normalView = {
     ...s,
-    mode: 'KNOCKOUT_2V2' as const,
     currentPlayerId: actor,
     pieces: s.pieces.filter((p) => !isHalki(p)),
   };
-  const normal = knockoutMoves(normalView, actor, die).map((m) => ({
+  const normal = normalMoves(normalView, actor, die, true).map((m) => ({
     ...m,
     knockIds: [] as string[],
   }));
@@ -197,11 +208,7 @@ function candidates(s: Match, actor: string, die: number): Move[] {
   const all = [...normal, ...special.filter((m) => m.path.length === die)].map(
     (m) => ({ ...m, knockIds: preview(s, m) }),
   );
-  const required = all.filter(
-    (m) =>
-      isHalki(s.pieces.find((p) => p.id === m.pieceId)!) && m.knockIds.length,
-  );
-  return required.length ? required : all;
+  return all;
 }
 function legal(s: Match, actor: string, die?: number | null): Move[] {
   if (
@@ -222,25 +229,22 @@ function legal(s: Match, actor: string, die?: number | null): Move[] {
 function poolMoves(s: Match, actor: string, die?: number | null): Move[] {
   const activation = pairMoves(s, actor);
   if (activation.length && lastPieceCondition(s, actor)) return activation;
-  const normal = s
-    .revenge!.turnDice.filter(
-      (d) => d.status === 'available' && (die == null || d.value === die),
-    )
-    .flatMap((d) =>
-      candidates(s, actor, d.value).map((m) => ({ ...m, dieId: d.id })),
-    );
-  const activeKills = normal.filter(
-    (m) =>
-      isHalki(s.pieces.find((p) => p.id === m.pieceId)!) && m.knockIds.length,
-  );
-  return [...activation, ...(activeKills.length ? activeKills : normal)];
+  const current = s.revenge!.turnDice.find((d) => d.status === 'available');
+  const normal =
+    current && (die == null || current.value === die)
+      ? candidates(s, actor, current.value).map((m) => ({
+          ...m,
+          dieId: current.id,
+        }))
+      : [];
+  return [...activation, ...normal];
 }
 export function lastPieceCondition(s: Match, actor: string) {
   const own = s.pieces.filter((p) => p.ownerId === actor);
   return (
     own.length === 4 &&
     own.filter((p) => p.position.kind === 'HOME').length === 3 &&
-    own.filter((p) => p.position.kind !== 'HOME').length === 1
+    own.filter((p) => p.position.kind !== 'HOME' && !isHalki(p)).length === 1
   );
 }
 function pairMoves(s: Match, actor: string): Move[] {
@@ -300,10 +304,9 @@ function eligible(s: Match, actor: string) {
 function activationMoves(s: Match, actor: string, bonus: number): Move[] {
   const index = reverseHomeIndex(bonus);
   if (index === null || !eligible(s, actor)) return [];
-  const owner = s.players.find((p) => p.id === actor)!;
   const moves: Move[] = [];
   for (const enemy of s.players.filter(
-    (p) => p.team !== owner.team && !p.forfeited,
+    (p) => !teammates(s, p.id, actor) && !p.forfeited,
   )) {
     const attacker = {
       ...s.pieces.find((p) => p.ownerId === actor)!,
@@ -314,7 +317,7 @@ function activationMoves(s: Match, actor: string, bonus: number): Move[] {
       },
     };
     const defenders = squarePieces(s, attacker).filter(
-      (p) => s.players.find((x) => x.id === p.ownerId)!.team !== owner.team,
+      (p) => !teammates(s, p.ownerId, actor),
     );
     if (!canCapture(s, attacker, defenders)) continue;
     for (const piece of s.pieces.filter(
@@ -342,11 +345,12 @@ function activationMoves(s: Match, actor: string, bonus: number): Move[] {
 }
 function prepare(s: Match, now: number, events: GameEvent[]) {
   const r = s.revenge!;
+  escapeSoloStalemate(s, events);
   syncDice(s);
   if (!r.rollPending && !poolMoves(s, r.beneficiaryId).length) {
     const unused = r.turnDice.filter((d) => d.status === 'available');
     if (unused.length) {
-      unused.forEach((d) => (d.status = 'unplayable'));
+      unused.forEach((d, i) => (d.status = i === 0 ? 'unplayable' : 'ended'));
       events.push({ type: 'NO_MOVES', playerId: r.beneficiaryId });
     }
     advance(s, now, events);
@@ -370,7 +374,8 @@ function roll(
     ];
   s.revision++;
   s.lastRoll = die;
-  s.consecutiveSixes = die === 6 ? s.consecutiveSixes + 1 : 0;
+  const streak = s.consecutiveSixes;
+  s.consecutiveSixes = die === 6 ? streak + 1 : 0;
   const parent = r.turnDice.at(-1);
   r.turnDice.push({
     id: `${s.turnNumber}:${r.turnDice.length}`,
@@ -379,13 +384,13 @@ function roll(
     status: 'available',
   });
   if (die === 6) s.players.find((p) => p.id === actor)!.sixes++;
+  if (die !== 6 && streak > 0 && streak % 3 === 0) {
+    for (const d of r.turnDice.slice(-streak - 1, -1)) d.status = 'burned';
+    events.push({ type: 'SIX_BURNED', playerId: actor, value: streak });
+  }
   try {
-    r.rollPending =
-      die === 6 &&
-      (candidates(s, r.beneficiaryId, 6).length > 0 ||
-        [1, 2, 3, 4, 5].some(
-          (b) => activationMoves(s, r.beneficiaryId, b).length,
-        ));
+    // Always collect the complete streak before adjudicating its sixes.
+    r.rollPending = die === 6;
     prepare(s, now, events);
   } catch (e) {
     if (!(e instanceof UndefinedRevengeRule)) throw e;
@@ -413,13 +418,7 @@ function move(
         : m.action !== 'activate'),
   );
   if (!m) {
-    const required =
-      original.revenge!.halkiChoice?.required ||
-      legal(original, actor).some(
-        (m) =>
-          isHalki(original.pieces.find((p) => p.id === m.pieceId)!) &&
-          m.knockIds.length,
-      );
+    const required = original.revenge!.halkiChoice?.required;
     throw new RuleError(
       required
         ? 'HALKI REQUIRED. Choose a highlighted Halki.'
@@ -458,7 +457,7 @@ function move(
   resolveDeparture(s, original, id, events);
   resolveArrival(s, original, id, events);
   syncSquares(s, original, events);
-  if (m.stopsAtGate && !s.players.find((p) => p.id === actor)!.homeUnlocked)
+  if (m.stopsAtGate && !piece.hasCaptured && !piece.homeEntryWaived)
     events.push({ type: 'HOME_LOCKED', playerId: actor, pieceId: id });
   if (piece.position.kind === 'HOME')
     events.push({ type: 'PIECE_SECURED', playerId: actor, pieceId: id });
@@ -467,23 +466,28 @@ function move(
   const finished = homeCount(s, actor) === 4;
   if (finished && !r.secured.includes(actor)) {
     r.secured.push(actor);
-    r.support[actor] = {
-      rotationsLeft: 4,
-      pending: activePlayers(s),
-      ready: false,
-    };
-    events.push({ type: 'SUPPORT_WAIT', playerId: actor });
+    if (isTeamMode(s.mode))
+      r.support[actor] = {
+        rotationsLeft: 4,
+        pending: activePlayers(s),
+        ready: false,
+      };
+    if (isTeamMode(s.mode))
+      events.push({ type: 'SUPPORT_WAIT', playerId: actor });
   }
   s.revision++;
   const owner = s.players.find((p) => p.id === actor)!;
-  if (teamProgress(s, owner.team!) === 8) {
+  if (isTeamMode(s.mode) ? teamProgress(s, owner.team!) === 8 : finished) {
     s.phase = 'FINISHED';
     s.winner = actor;
     s.winnerTeam = owner.team;
     s.winReason = 'HOME';
     s.deadline = null;
     s.dice = null;
-    events.push({ type: 'TEAM_WON', playerId: actor });
+    events.push({
+      type: isTeamMode(s.mode) ? 'TEAM_WON' : 'PLAYER_WON',
+      playerId: actor,
+    });
   } else if (!finished) {
     try {
       prepare(s, now, events);
@@ -501,7 +505,7 @@ export function declineHalki(
   actor: string,
   now = Date.now(),
 ): Resolution {
-  if (original.mode !== 'REVENGE')
+  if (!isRevenge(original.mode))
     throw new RuleError('This choice is only available in Revenge.');
   check(original, actor, true);
   const options = pairMoves(original, actor);
@@ -532,13 +536,29 @@ function timeout(original: Match, now: number): Resolution {
   advance(s, now, events);
   return { state: s, events };
 }
-function forfeit(original: Match, actor: string, _now?: number): Resolution {
+function forfeit(original: Match, actor: string, now = Date.now()): Resolution {
   const player = original.players.find((p) => p.id === actor);
   if (!player || player.forfeited || original.phase !== 'PLAYING')
     return { state: original, events: [] };
   const s = structuredClone(original),
     p = s.players.find((p) => p.id === actor)!;
   p.forfeited = true;
+  if (!isTeamMode(s.mode)) {
+    const remaining = s.players.filter((x) => !x.forfeited);
+    const events: GameEvent[] = [{ type: 'PLAYER_FORFEITED', playerId: actor }];
+    s.revision++;
+    if (remaining.length === 1) {
+      s.phase = 'FINISHED';
+      s.winner = remaining[0].id;
+      s.winnerTeam = null;
+      s.winReason = 'FORFEIT';
+      s.dice = null;
+      s.deadline = null;
+      events.push({ type: 'PLAYER_WON', playerId: s.winner });
+    } else if (s.currentPlayerId === actor) advance(s, now, events);
+    syncSquares(s);
+    return { state: s, events };
+  }
   s.phase = 'FINISHED';
   s.winner = s.players.find((x) => x.team !== p.team)!.id;
   s.winnerTeam = s.players.find((x) => x.id === s.winner)!.team;

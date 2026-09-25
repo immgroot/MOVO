@@ -50,6 +50,8 @@ import {
   type BoardStyle,
 } from '../../shared/cosmetics';
 import { COLORS, MARKS, type Seat } from '../../shared/topology';
+import { MODES, isRevenge, isTeamMode, modeName } from '../../shared/modes';
+import { viewSeat } from '../../shared/board-view';
 import { teamForSeat, teamProgress, type Mode } from '../../shared/game';
 import type {
   Intent,
@@ -77,12 +79,6 @@ const initialSettings: RoomSettings = {
   timerSeconds: 30,
   spectators: true,
 };
-const modeName = (mode: Mode) =>
-  mode === 'REVENGE'
-    ? 'REVENGE'
-    : mode === 'KNOCKOUT_2V2'
-      ? 'KNOCKOUT 2v2'
-      : 'KNOCKOUT';
 function useClock() {
   const [time, setTime] = useState(0);
   useEffect(() => {
@@ -352,7 +348,7 @@ export default function Movo() {
             <div className="game-mode">
               {modeName(model.settings.mode)}{' '}
               <span>
-                {model.settings.mode === 'REVENGE'
+                {isRevenge(model.settings.mode)
                   ? 'WINNING ISN’T SAFE.'
                   : 'NO KNOCK. NO HOME.'}
               </span>
@@ -500,7 +496,7 @@ export default function Movo() {
                                 ? model?.match?.phase === 'PLAYING'
                                   ? 'Leaving an active match forfeits your seat.'
                                   : 'You can rejoin the lobby with its room code.'
-                                : guideMode === 'REVENGE'
+                                : isRevenge(guideMode)
                                   ? 'WINNING ISN’T SAFE. · Your visual Revenge guide.'
                                   : 'ROLL. KNOCK. GET HOME. · A 90-second table guide.'}
           </DialogDescription>
@@ -563,34 +559,43 @@ export default function Movo() {
                   </span>
                 </button>
               ))}
-              <div className="mode-choice revenge-choice">
-                <span className="mode-number">03</span>
-                <span className="mode-choice-copy">
-                  <b>REVENGE</b>
-                  <span>WINNING ISN’T SAFE.</span>
-                  <small>2 VS 2 · HALKI</small>
-                </span>
-                <div className="revenge-card-actions">
-                  <button
-                    className="mode-play"
-                    onClick={() => {
-                      setConfig({ ...config, mode: 'REVENGE', capacity: 4 });
-                      setModal(afterMode);
-                    }}
-                  >
-                    PLAY <ArrowRight size={18} />
-                  </button>
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setGuideMode('REVENGE');
-                      setModal('how');
-                    }}
-                  >
-                    HOW TO PLAY
-                  </button>
+              {(['REVENGE_TEAM', 'REVENGE_SOLO'] as Mode[]).map((mode, i) => (
+                <div key={mode} className="mode-choice revenge-choice">
+                  <span className="mode-number">0{i + 3}</span>
+                  <span className="mode-choice-copy">
+                    <b>{modeName(mode)}</b>
+                    <span>WINNING ISN’T SAFE.</span>
+                    <small>
+                      {isTeamMode(mode) ? '2 VS 2' : '2–4 PLAYERS · SOLO'} ·
+                      HALKI
+                    </small>
+                  </span>
+                  <div className="revenge-card-actions">
+                    <button
+                      className="mode-play"
+                      onClick={() => {
+                        setConfig({
+                          ...config,
+                          mode,
+                          capacity: isTeamMode(mode) ? 4 : config.capacity,
+                        });
+                        setModal(afterMode);
+                      }}
+                    >
+                      PLAY <ArrowRight size={18} />
+                    </button>
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setGuideMode(mode);
+                        setModal('how');
+                      }}
+                    >
+                      HOW TO PLAY
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           )}
           {['play', 'create', 'join'].includes(modal ?? '') && (
@@ -605,7 +610,7 @@ export default function Movo() {
                   }}
                 >
                   {modeName(config.mode)} ·{' '}
-                  {config.mode === 'KNOCKOUT' ? '2–4' : '4'} players{' '}
+                  {isTeamMode(config.mode) ? '4' : '2–4'} players{' '}
                   <span>Change</span>
                 </button>
               )}
@@ -637,7 +642,7 @@ export default function Movo() {
                     <fieldset>
                       <legend>Players</legend>
                       <div className="segmented">
-                        {(config.mode !== 'KNOCKOUT'
+                        {(isTeamMode(config.mode)
                           ? ([4] as const)
                           : ([2, 3, 4] as const)
                         ).map((n) => (
@@ -934,21 +939,20 @@ export default function Movo() {
                 role="tablist"
                 aria-label="Rules mode"
               >
-                {(['KNOCKOUT', 'KNOCKOUT_2V2', 'REVENGE'] as Mode[]).map(
-                  (mode) => (
-                    <button
-                      key={mode}
-                      role="tab"
-                      aria-selected={guideMode === mode}
-                      onClick={() => setGuideMode(mode)}
-                    >
-                      {modeName(mode)}
-                    </button>
-                  ),
-                )}
+                {MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    role="tab"
+                    aria-selected={guideMode === mode}
+                    onClick={() => setGuideMode(mode)}
+                  >
+                    {modeName(mode)}
+                  </button>
+                ))}
               </div>
-              {guideMode === 'REVENGE' ? (
+              {isRevenge(guideMode) ? (
                 <RevengeTutorial
+                  solo={guideMode === 'REVENGE_SOLO'}
                   reduced={game.prefs.reduced}
                   onDone={() => setModal(null)}
                 />
@@ -978,7 +982,15 @@ export default function Movo() {
     </BoardStyleContext.Provider>
   );
 }
-function Badge({ member, model }: { member: Member; model: Snapshot }) {
+function Badge({
+  member,
+  model,
+  viewerSeat,
+}: {
+  member: Member;
+  model: Snapshot;
+  viewerSeat?: Seat | null;
+}) {
   const p = model.match?.players.find((p) => p.id === member.id),
     home =
       model.match?.pieces.filter(
@@ -990,7 +1002,7 @@ function Badge({ member, model }: { member: Member; model: Snapshot }) {
     model.match.currentPlayerId === member.id;
   return (
     <div
-      className={`player-badge premium-player banner-${publicCosmetics(member.cosmetics).banner} seat-${member.seat} ${active ? 'active' : ''} ${p?.forfeited ? 'forfeited' : ''} ${model.settings.mode === 'REVENGE' && model.match ? 'revenge-player' : ''}`}
+      className={`player-badge premium-player banner-${publicCosmetics(member.cosmetics).banner} seat-${viewSeat(member.seat ?? 0, viewerSeat)} ${active ? 'active' : ''} ${p?.forfeited ? 'forfeited' : ''} ${isRevenge(model.settings.mode) && model.match ? 'revenge-player' : ''}`}
       style={{ '--player': COLORS[member.seat ?? 0] } as CSSProperties}
     >
       <div className="player-avatar" aria-hidden="true">
@@ -1018,7 +1030,7 @@ function Badge({ member, model }: { member: Member; model: Snapshot }) {
               aria-label="Connected"
             />
           )}
-          {model.settings.mode !== 'KNOCKOUT' && (
+          {isTeamMode(model.settings.mode) && (
             <span className="team-badge">{teamForSeat(member.seat!)}</span>
           )}
           <span>
@@ -1048,15 +1060,13 @@ function Badge({ member, model }: { member: Member; model: Snapshot }) {
                 {home}/4
               </div>
               <span>
-                {model.settings.mode === 'REVENGE' ? (
+                {isRevenge(model.settings.mode) ? (
                   <>
                     {model.match.revenge?.support[member.id]
                       ? model.match.revenge.support[member.id].ready
                         ? 'SUPPORT READY'
                         : `SUPPORT IN ${model.match.revenge.support[member.id].rotationsLeft}`
-                      : p?.homeUnlocked
-                        ? 'HOME OPEN'
-                        : 'NEED 1 KNOCK'}
+                      : `${model.match.pieces.filter((piece) => piece.ownerId === member.id && (piece.hasCaptured || piece.homeEntryWaived)).length}/4 CAN ENTER HOME`}
                   </>
                 ) : (
                   <>
@@ -1118,8 +1128,9 @@ function Lobby({
         <div className="lobby-board">
           <Board
             pieces={[]}
+            viewerSeat={me.seat}
             label={`MOVO ${modeName(model.settings.mode)} board`}
-            revengeMode={model.settings.mode === 'REVENGE'}
+            revengeMode={isRevenge(model.settings.mode)}
             unlocked={[]}
           />
         </div>
@@ -1137,11 +1148,11 @@ function Lobby({
         {seats.map((seat) => {
           const m = players.find((m) => m.seat === seat);
           return m ? (
-            <Badge key={seat} member={m} model={model} />
+            <Badge key={seat} member={m} model={model} viewerSeat={me.seat} />
           ) : (
             <button
               key={seat}
-              className={`empty-seat seat-${seat}`}
+              className={`empty-seat seat-${viewSeat(seat, me.seat)}`}
               onClick={onInvite}
             >
               <span>+</span>
@@ -1151,7 +1162,7 @@ function Lobby({
           );
         })}
       </div>
-      {model.settings.mode !== 'KNOCKOUT' && (
+      {isTeamMode(model.settings.mode) && (
         <div className="lobby-teams">
           {(['A', 'B'] as const).map((team) => (
             <div key={team}>
@@ -1167,7 +1178,7 @@ function Lobby({
         </div>
       )}
       <div className="lobby-controls">
-        {host && model.settings.mode !== 'KNOCKOUT' && (
+        {host && isTeamMode(model.settings.mode) && (
           <button
             className="quiet-button"
             disabled={busy || players.length !== 4}
@@ -1358,7 +1369,7 @@ function MatchTable({
             </span>
           </output>
         )}
-      {match.mode !== 'KNOCKOUT' && (
+      {isTeamMode(match.mode) && (
         <div className="team-score" aria-label="Team progress">
           {(['A', 'B'] as const).map((team) => (
             <span key={team}>
@@ -1395,6 +1406,7 @@ function MatchTable({
             pieces={match.pieces.filter(
               (p) => !match.players.find((o) => o.id === p.ownerId)!.forfeited,
             )}
+            viewerSeat={me?.seat}
             positions={game.positions}
             motion={game.motion}
             captureMotions={game.captureMotions}
@@ -1403,7 +1415,7 @@ function MatchTable({
             onInspect={setInspection}
             revenge={match.revenge}
             label={
-              match.mode === 'REVENGE'
+              isRevenge(match.mode)
                 ? 'MOVO Revenge board'
                 : 'MOVO Knockout board'
             }
@@ -1411,7 +1423,7 @@ function MatchTable({
               .filter((m) => m.pieceId === selected)
               .map((m) => m.path.at(-1)!)}
             eligible={
-              match.mode === 'REVENGE'
+              isRevenge(match.mode)
                 ? match.pieces
                     .filter(
                       (p) =>
@@ -1429,7 +1441,13 @@ function MatchTable({
             interactionKey={auth.revision}
             onMove={move}
             unlocked={match.players
-              .filter((p) => p.homeUnlocked)
+              .filter(
+                (p) =>
+                  p.homeUnlocked ||
+                  match.pieces.some(
+                    (piece) => piece.ownerId === p.id && piece.homeEntryWaived,
+                  ),
+              )
               .map((p) => p.seat)}
             active={
               match.players.find((p) => p.id === auth.currentPlayerId)?.seat
@@ -1443,6 +1461,7 @@ function MatchTable({
             <Badge
               key={m.id}
               member={m}
+              viewerSeat={me?.seat}
               model={{
                 ...model,
                 reactions: game.snapshot!.reactions,
@@ -1496,14 +1515,12 @@ function MatchTable({
         </div>
         <Die
           value={game.die}
+          reduced={game.prefs.reduced}
           disabled={
             !canRoll ||
             (auth.revenge ? !auth.revenge.rollPending : auth.dice !== null)
           }
-          rolling={
-            game.effect === 'dice-rolling' ||
-            (game.pending && auth.dice === null)
-          }
+          rolling={game.effect === 'dice-rolling'}
           onRoll={() => {
             void onAction({ type: 'roll' });
           }}
@@ -1511,15 +1528,11 @@ function MatchTable({
         <div className="home-status">
           {auth.revenge ? (
             <div>
-              <strong>
-                {me?.homeUnlocked
-                  ? 'HOME UNLOCKED'
-                  : 'HOME LOCKED · NEED 1 KNOCK'}
-              </strong>
+              <strong>EACH PIECE NEEDS ITS OWN KNOCK</strong>
               <span>
                 {auth.revenge.rollPending
                   ? 'SIX = ANOTHER ROLL'
-                  : 'USE EACH DIE SEPARATELY'}
+                  : 'USE DICE IN ORDER'}
               </span>
             </div>
           ) : (
@@ -1550,8 +1563,8 @@ function MatchTable({
             <span>
               {turnDice.length
                 ? auth.revenge.rollPending
-                  ? 'Roll your bonus, then choose your moves.'
-                  : 'Choose an available die, then a piece.'
+                  ? 'Keep rolling until the first non-six.'
+                  : 'Use the first available die, then the next.'
                 : (auth.players.find(
                     (p) => p.id === auth.revenge?.previousTurn?.playerId,
                   )?.name ?? 'Roll to begin.')}
@@ -1590,9 +1603,15 @@ function MatchTable({
                       ? '✓ HALKI'
                       : d.status === 'unplayable'
                         ? 'NO MOVE'
-                        : d.status === 'ended'
-                          ? 'TURN ENDED'
-                          : 'AVAILABLE'}
+                        : d.status === 'burned'
+                          ? 'BURNED'
+                          : d.status === 'ended'
+                            ? 'FORFEITED'
+                            : auth.revenge!.rollPending
+                              ? 'COLLECTING'
+                              : chosenDie?.id === d.id
+                                ? 'CURRENT'
+                                : 'WAITING'}
                 </small>
               </button>
             ))}
@@ -1681,7 +1700,7 @@ function MatchTable({
                       })
                     }
                   >
-                    Invade {target.name} · HOME{' '}
+                    Use Halki · {target.name} · HOME{' '}
                     {'index' in at ? at.index + 1 : ''}
                   </button>
                 );
@@ -1692,7 +1711,7 @@ function MatchTable({
               className="quiet-button decline-halki"
               onClick={() => void onAction({ type: 'declineHalki' })}
             >
-              Play dice normally
+              Decline / continue normal turn
             </button>
           )}
         </div>
@@ -1841,6 +1860,7 @@ export function Results({
       <div className="results-board">
         <Board
           revenge={match.revenge}
+          viewerSeat={match.players.find((p) => p.id === model.selfId)?.seat}
           label={`MOVO ${modeName(match.mode)} result board`}
           pieces={match.pieces.filter(
             (p) => !match.players.find((o) => o.id === p.ownerId)!.forfeited,

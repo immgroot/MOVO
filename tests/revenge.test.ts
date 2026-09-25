@@ -108,7 +108,7 @@ describe('Revenge registration and normal route', () => {
         index: (HOME_GATES[seat] + 51) % 52,
         travelled: 49,
       };
-      const r = turn(s, seat, 3, 0);
+      const r = turn(s, seat, 1, 0);
       expect(r.state.pieces[seat * 4].position).toEqual({
         kind: 'HOME_GATE_LOCKED',
         index: HOME_GATES[seat],
@@ -168,27 +168,27 @@ describe('Team Shield and automatic contests', () => {
     expect(r.events.filter((e) => e.type === 'PIECE_KNOCKED')).toHaveLength(2);
     expect(r.state.revenge!.shields).toEqual([]);
   });
-  it('Halki arrival kills the two teammates immediately, leaving no reinforcement contest', () => {
+  it('Halki arrival respects the two-teammate shield and creates a contest', () => {
     const s = game();
     s.pieces[0].position = track(6);
     s.pieces[8].position = track(6);
     s.pieces[4].position = h(9);
     syncSquares(s);
     const r = turn(s, 1, 3, 0);
-    expect(r.state.pieces[0].position.kind).toBe('BASE');
-    expect(r.state.pieces[8].position.kind).toBe('BASE');
+    expect(r.state.pieces[0].position.kind).toBe('TRACK');
+    expect(r.state.pieces[8].position.kind).toBe('TRACK');
     expect(r.state.pieces[4].position).toMatchObject({
       kind: 'HALKI_TRACK',
       homeSeat: 1,
       index: 6,
     });
-    expect(r.state.revenge!.contests).toEqual([]);
-    expect(r.events.filter((e) => e.type === 'PIECE_KNOCKED')).toHaveLength(2);
+    expect(r.state.revenge!.contests).toHaveLength(1);
+    expect(r.events.filter((e) => e.type === 'PIECE_KNOCKED')).toHaveLength(0);
     expect(
       r.events.some(
         (e) => e.type === 'CONTEST_CREATED' || e.type === 'REINFORCED',
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
   it('Halki supplies its owner for a mixed teammate shield', () => {
     const s = game();
@@ -376,29 +376,24 @@ describe('kill-dependent Halki activation', () => {
     expect(b.state.revenge!.activationValue).toBe(4);
     expect(b.state.revenge!.halkiChoice?.dieIds).toEqual(['1:1', '1:2']);
   });
-  it('third six stays in the pool, retaining both earlier six movements', () => {
+  it('third six stays pending until a non-six burns the completed streak', () => {
     const { second } = activation(1, 6);
     const third = resolveRoll(second.state, 'p0', 6);
     expect(third.events.some((e) => e.type === 'SIX_BURNED')).toBe(false);
     const fourth = resolveRoll(third.state, 'p0', 4);
-    expect(fourth.state.revenge!.activationValue).toBe(4);
-    const firstMove = resolveMove(
-      fourth.state,
-      'p0',
-      'p0:1',
-      0,
-      undefined,
-      '1:0',
-    );
-    const end = resolveMove(firstMove.state, 'p0', 'p0:1', 0, undefined, '1:1');
-    expect(end.state.pieces[1].position).toMatchObject({ index: 16 });
-    expect(end.state.currentPlayerId).toBe('p0');
-    expect(end.state.revenge!.turnDice.map((d) => d.status)).toEqual([
-      'used',
-      'used',
-      'available',
+    expect(fourth.state.revenge!.activationValue).toBeNull();
+    expect(fourth.state.revenge!.turnDice.map((d) => d.status)).toEqual([
+      'burned',
+      'burned',
+      'burned',
       'available',
     ]);
+    expect(() =>
+      resolveMove(fourth.state, 'p0', 'p0:1', 0, undefined, '1:0'),
+    ).toThrow();
+    const moved = resolveMove(fourth.state, 'p0', 'p0:1', 0, undefined, '1:3');
+    expect(moved.state.pieces[1].position).toMatchObject({ index: 8 });
+    expect(moved.state.currentPlayerId).toBe('p1');
   });
 });
 describe('active Halki combat, route and identity', () => {
@@ -414,33 +409,36 @@ describe('active Halki combat, route and identity', () => {
     ).toHaveLength(count <= 2 ? count : 0);
     if (count === 3) expect(r.state.revenge!.contests[0].kind).toBe('HALKI');
   });
-  it('Halki breaks a two-color shield but never kills its own teammates', () => {
+  it('Halki respects a two-color shield but never kills its own teammates', () => {
     const s = game();
     s.pieces[0].position = h(9);
     for (const i of [4, 12, 8]) s.pieces[i].position = track(6);
     const r = turn(s, 0, 3, 0);
-    expect(r.state.pieces[4].position.kind).toBe('BASE');
-    expect(r.state.pieces[12].position.kind).toBe('BASE');
+    expect(r.state.pieces[4].position.kind).toBe('TRACK');
+    expect(r.state.pieces[12].position.kind).toBe('TRACK');
     expect(r.state.pieces[8].position.kind).toBe('TRACK');
   });
-  it('three-to-two automatic capture respects strength and emits both returns', () => {
+  it('three-to-two leaves a genuine teammate shield protected', () => {
     const s = game();
     s.pieces[0].position = h(6);
     for (const i of [4, 5, 12]) s.pieces[i].position = track(6);
     syncSquares(s);
     const r = turn(s, 1, 1, 1);
-    expect(r.state.pieces[4].position.kind).toBe('BASE');
-    expect(r.state.pieces[12].position.kind).toBe('BASE');
-    expect(r.events.filter((e) => e.type === 'PIECE_KNOCKED')).toHaveLength(2);
+    expect(r.state.pieces[4].position.kind).toBe('TRACK');
+    expect(r.state.pieces[12].position.kind).toBe('TRACK');
+    expect(r.events.filter((e) => e.type === 'PIECE_KNOCKED')).toHaveLength(0);
   });
-  it('later Halki kill is compulsory over normal movement', () => {
+  it('an active Halki kill does not force a move outside the birth condition', () => {
     const s = game();
     s.pieces[0].position = h(9);
     s.pieces[1].position = track(1);
     s.pieces[4].position = track(6);
     const r = resolveRoll(s, 'p0', 3);
-    expect(legalMoves(r.state, 'p0').map((m) => m.pieceId)).toEqual(['p0:0']);
-    expect(() => resolveMove(r.state, 'p0', 'p0:1')).toThrow(/HALKI REQUIRED/);
+    expect(legalMoves(r.state, 'p0').map((m) => m.pieceId)).toEqual([
+      'p0:1',
+      'p0:0',
+    ]);
+    expect(() => resolveMove(r.state, 'p0', 'p0:1')).not.toThrow();
   });
   it('active Halki can make a non-killing reverse move', () => {
     const s = game();

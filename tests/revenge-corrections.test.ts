@@ -114,14 +114,14 @@ describe('corrected ownership and shield composition', () => {
       take(s, 0, 3, 0).events.filter((e) => e.type === 'PIECE_KNOCKED'),
     ).toHaveLength(2);
   });
-  it('normal+normal mixed shield still loses to a two-piece Halki attack', () => {
+  it('normal+normal mixed shield resists a two-piece Halki attack', () => {
     const s = game();
     s.pieces[0].position = halki(9);
     s.pieces[4].position = track(6);
     s.pieces[12].position = track(6);
     expect(
       take(s, 0, 3, 0).events.filter((e) => e.type === 'PIECE_KNOCKED'),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
   });
   it('three-to-two does not capture a remaining protected normal/Halki pair', () => {
     const s = game();
@@ -165,12 +165,12 @@ describe('corrected ownership and shield composition', () => {
   });
 });
 describe('corrected Home gate', () => {
-  it('locks once, cannot start another lap, and another piece unlocks without teleporting', () => {
+  it('locks once, cannot start another lap, and another piece cannot unlock it', () => {
     const s = game();
     s.pieces[0].position = track(49, 49);
     s.pieces[1].position = track(3);
     s.pieces[4].position = track(6);
-    const wait = take(s, 0, 3, 0);
+    const wait = take(s, 0, 1, 0);
     expect(wait.state.pieces[0].position).toEqual({
       kind: 'HOME_GATE_LOCKED',
       index: 50,
@@ -194,15 +194,16 @@ describe('corrected Home gate', () => {
       unlocked.events.filter((e) => e.type === 'HOME_UNLOCKED'),
     ).toHaveLength(1);
     expect(positionKey(unlocked.state.pieces[0].position, 0, 0)).toBe(at);
-    expect(take(unlocked.state, 0, 1, 0).state.pieces[0].position).toEqual({
-      kind: 'HOME_LANE',
-      index: 0,
-    });
+    expect(unlocked.state.pieces[0].position.kind).toBe('HOME_GATE_LOCKED');
+    expect(unlocked.state.pieces[0].hasCaptured).toBe(false);
+    expect(unlocked.state.pieces[1].hasCaptured).toBe(true);
+    expect(() => take(unlocked.state, 0, 1, 0)).toThrow();
   });
-  it('an already-unlocked player enters Home using the remaining pips', () => {
+  it('an already-unlocked piece enters Home using the remaining pips', () => {
     const s = game();
     s.players[0].knocked = 1;
     s.players[0].homeUnlocked = true;
+    s.pieces[0].hasCaptured = true;
     s.pieces[0].position = track(49, 49);
     expect(take(s, 0, 3, 0).state.pieces[0].position).toEqual({
       kind: 'HOME_LANE',

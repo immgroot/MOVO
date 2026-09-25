@@ -33,7 +33,7 @@ function target(finished = 2) {
   return s;
 }
 describe('Revenge turn dice and unlimited sixes', () => {
-  it.each([1, 2, 3, 4, 5, 8])(
+  it.each([1, 2, 4, 5, 7, 8])(
     '%i sixes stay playable and each earns its bonus',
     (count) => {
       let s = game();
@@ -148,16 +148,17 @@ describe('Revenge turn dice and unlimited sixes', () => {
     s = spend(s, 1);
     expect(s.pieces[0].position).toMatchObject({ index: 4 });
   });
-  it('different pieces may use separate dice in either legal order', () => {
+  it('different pieces use separate dice in their original order', () => {
     const start = game();
     start.pieces[1].position = { kind: 'TRACK', index: 3, travelled: 3 };
     let s = chain(start, [6, 4]);
-    s = spend(s, 1, 'p0:1');
-    expect(s.revenge!.turnDice.map((d) => d.status)).toEqual([
-      'available',
-      'used',
-    ]);
+    expect(() => spend(s, 1, 'p0:1')).toThrow();
     s = spend(s, 0);
+    expect(s.revenge!.turnDice.map((d) => d.status)).toEqual([
+      'used',
+      'available',
+    ]);
+    s = spend(s, 1, 'p0:1');
     expect(s.pieces[0].position).toMatchObject({ index: 0 });
     expect(s.pieces[1].position).toMatchObject({ index: 7 });
   });

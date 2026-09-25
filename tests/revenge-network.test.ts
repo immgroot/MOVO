@@ -17,7 +17,11 @@ function send(socket: Socket, x: Partial<Intent>) {
     socket.emit('intent', { v: 1, requestId: randomUUID(), ...x }, resolve),
   );
 }
-async function setup(database?: string) {
+async function setup(
+  database?: string,
+  mode: Mode = 'REVENGE_TEAM',
+  count: 2 | 3 | 4 = 4,
+) {
   let now = 1000,
     die = 6;
   const service = createGameService({
@@ -47,22 +51,22 @@ async function setup(database?: string) {
     return { socket, w };
   }
   const players: { socket: Socket; w: Welcome }[] = [];
-  for (let i = 0; i < 4; i++) players.push(await connect());
+  for (let i = 0; i < count; i++) players.push(await connect());
   const host = players[0];
   let r = await send(host.socket, {
     type: 'create',
     name: 'GROOT',
     settings: {
-      mode: 'REVENGE',
+      mode,
       name: 'Revenge test',
-      capacity: 4,
+      capacity: count,
       private: true,
       timerSeconds: 0,
       spectators: true,
     },
   });
   const code = r.snapshot!.code;
-  for (let i = 1; i < 4; i++) {
+  for (let i = 1; i < count; i++) {
     await send(players[i].socket, {
       type: 'join',
       code,
@@ -230,7 +234,7 @@ it('spectators see Revenge but cannot play, chat or react', async () => {
     spectate: true,
   });
   expect(joined.ok).toBe(true);
-  expect(joined.snapshot!.match!.mode).toBe('REVENGE');
+  expect(joined.snapshot!.match!.mode).toBe('REVENGE_TEAM');
   expect(joined.snapshot!.legal).toEqual([]);
   for (const type of ['roll', 'chat', 'reaction', 'declineHalki'] as const)
     expect(
@@ -491,3 +495,40 @@ it('server rejects forged/reused dice and restores consumption on reconnect', as
     rejoined.w.snapshot!.match!.revenge!.turnDice.map((d) => d.bonusOf),
   ).toEqual([null, '1:0', '1:1']);
 });
+
+it.each([2, 3, 4] as const)(
+  'Solo supports %i real sockets, ordered dice and reconnect',
+  async (count) => {
+    const c = await setup(undefined, 'REVENGE_SOLO', count);
+    expect(c.room.match!.players).toHaveLength(count);
+    expect(c.room.match!.players.every((p) => p.team === null)).toBe(true);
+    expect((await send(c.players[0].socket, { type: 'randomize' })).ok).toBe(
+      false,
+    );
+    c.die(6);
+    const forged = { type: 'roll' as const, value: 1 };
+    const first = await c.act(0, 'roll', forged);
+    expect(first.snapshot!.match!.lastRoll).toBe(6);
+    c.die(4);
+    await c.act(0, 'roll');
+    const owner = c.room.match!.players[0].id;
+    expect(
+      (await c.act(0, 'move', { pieceId: owner + ':0', dieId: '1:1' })).ok,
+    ).toBe(false);
+    expect(
+      (await c.act(0, 'move', { pieceId: owner + ':0', dieId: '1:0' })).ok,
+    ).toBe(true);
+    const reconnect = await c.connect(c.players[0].w.token);
+    expect(
+      reconnect.w.snapshot!.match!.revenge!.turnDice.map((d) => d.status),
+    ).toEqual(['used', 'available']);
+    expect(reconnect.w.snapshot!.match!.pieces).toEqual(c.room.match!.pieces);
+    expect(
+      (await c.act(0, 'move', { pieceId: owner + ':0', dieId: '1:1' })).ok,
+    ).toBe(true);
+    expect(c.room.match!.pieces[0].position).toMatchObject({
+      kind: 'TRACK',
+      index: 4,
+    });
+  },
+);

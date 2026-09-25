@@ -12,7 +12,7 @@ export interface Support {
   ready: boolean;
 }
 export interface RevengeState {
-  version: 2;
+  version: 3;
   secured: string[];
   support: Record<string, Support>;
   beneficiaryId: string;
@@ -35,6 +35,6 @@ export interface TurnDie {
   id: string;
   value: number;
   bonusOf: string | null;
-  status: 'available' | 'used' | 'halki' | 'unplayable' | 'ended';
+  status: 'available' | 'used' | 'halki' | 'unplayable' | 'ended' | 'burned';
   pieceId?: string;
 }

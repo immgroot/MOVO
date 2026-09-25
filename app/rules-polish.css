@@ -1,0 +1,83 @@
+/* Keep the tabletop responsive while giving the desktop board more room. */
+@media (min-width: 981px) and (min-height: 551px) {
+  .match-table .table-frame {
+    width: 100%;
+    max-width: 1120px;
+    grid-template-columns: minmax(135px, 175px) minmax(0, 1fr) minmax(
+        135px,
+        175px
+      );
+  }
+  .match-table .table-frame .table-board,
+  .match-table:has(.halki-choices) .table-frame .table-board {
+    width: min(100%, 680px, max(440px, calc(100dvh - 275px)));
+    justify-self: center;
+  }
+}
+.board-colorful {
+  filter: drop-shadow(0 14px 20px #11181044);
+}
+.board-colorful .board-base > rect {
+  stroke-width: 1.7;
+}
+.board-colorful .board-tile > rect {
+  fill: #fff9ed;
+}
+.pool-die.burned {
+  opacity: 0.55;
+  text-decoration: line-through;
+  border-style: dashed;
+}
+.pool-die.burned small {
+  text-decoration: none;
+}
+.dice-pool {
+  flex-wrap: wrap;
+}
+.die-button.rolling .die-object {
+  animation: movo-dice-tumble 860ms linear both;
+}
+@keyframes movo-dice-tumble {
+  0% {
+    transform: translateY(0) rotate(-7deg);
+  }
+  12% {
+    transform: translateY(-12px) rotateX(20deg) rotateY(-24deg) rotate(30deg);
+  }
+  30% {
+    transform: translateY(-20px) rotateX(-35deg) rotateY(40deg) rotate(145deg);
+  }
+  49% {
+    transform: translateY(-16px) rotateX(25deg) rotateY(-25deg) rotate(266deg);
+  }
+  66% {
+    transform: translateY(-8px) rotateX(-9deg) rotateY(8deg) rotate(336deg);
+  }
+  79% {
+    transform: translateY(2px) rotate(353deg) scale(1.06, 0.93);
+  }
+  88% {
+    transform: translateY(-3px) rotate(355deg) scale(0.99, 1.02);
+  }
+  100% {
+    transform: translateY(0) rotate(353deg) scale(1);
+  }
+}
+.die-button.die-reduced.rolling .die-object {
+  animation: movo-dice-short 140ms ease-out both;
+}
+@keyframes movo-dice-short {
+  from {
+    opacity: 0.6;
+    transform: translateY(-2px) rotate(-7deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(-7deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-movo-motion='full']) .die-button.rolling .die-object {
+    animation: movo-dice-short 140ms ease-out both;
+  }
+}
